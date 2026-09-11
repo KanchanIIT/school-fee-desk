@@ -1,0 +1,6 @@
+{
+  "name":"school-fee-desk","version":"2.0.0","description":"School fee collection, PDF receipts, cloud sync, WhatsApp and Excel bookkeeping","main":"main.js","author":"School Fee Desk","license":"MIT",
+  "scripts":{"start":"electron .","dist":"electron-builder","dist:win":"electron-builder --win nsis","dist:mac":"electron-builder --mac dmg zip","dist:linux":"electron-builder --linux AppImage"},
+  "dependencies":{"exceljs":"^4.4.0","pdfkit":"^0.16.0"},"devDependencies":{"electron":"^38.0.0","electron-builder":"^26.0.12"},
+  "build":{"appId":"com.schoolfeedesk.app","productName":"School Fee Desk","files":["main.js","preload.js","renderer/**/*","package.json"],"directories":{"output":"dist"},"win":{"target":["nsis"],"artifactName":"School-Fee-Desk-Setup-${version}.${ext}"},"nsis":{"oneClick":false,"allowToChangeInstallationDirectory":true,"createDesktopShortcut":true,"createStartMenuShortcut":true},"mac":{"target":["dmg","zip"],"category":"public.app-category.finance","artifactName":"School-Fee-Desk-${version}-${arch}.${ext}"}}
+}
