@@ -17,7 +17,62 @@ async function upsert(d,t,row){if(!await ensure(d))return;if(membership.role==='
 async function upload(d,p){if(!p.receiptPath||!fs.existsSync(p.receiptPath)||!await ensure(d))return'';let f=membership.school_id+'/'+p.receiptNo.replace(/[^\w-]/g,'_')+'.pdf',r=await fetch(base(d)+'/storage/v1/object/invoices/'+f,{method:'POST',headers:{apikey:d.settings.cloudAnonKey,Authorization:'Bearer '+session.access_token,'Content-Type':'application/pdf','x-upsert':'true'},body:fs.readFileSync(p.receiptPath)});if(!r.ok)throw Error(await r.text());return base(d)+'/storage/v1/object/public/invoices/'+f}
 async function sync(d){if(!d.settings.cloudUrl||!d.settings.cloudAnonKey)throw Error('Configure cloud first.');if(!await ensure(d))throw Error('Sign in first.');if(membership.role!=='general'){for(let s of d.students)await upsert(d,'students',s);for(let p of d.payments){await upsert(d,'payments',p);if(!p.publicUrl)try{p.publicUrl=await upload(d,p)}catch{}}}for(let x of d.expenses)await upsert(d,'expenses',x);for(let x of d.inventoryItems)await upsert(d,'inventory_items',x);for(let x of d.inventoryOrders)await upsert(d,'inventory_orders',x);for(let x of d.studentInventory)await upsert(d,'student_inventory',x);let [ss,pp,ee,ii,io,si,sch]=await Promise.all([api(d,'/rest/v1/students?select=*'),api(d,'/rest/v1/payments?select=*'),api(d,'/rest/v1/expenses?select=*'),api(d,'/rest/v1/inventory_items?select=*'),api(d,'/rest/v1/inventory_orders?select=*'),api(d,'/rest/v1/student_inventory?select=*'),api(d,'/rest/v1/schools?select=id,name,config&id=eq.'+encodeURIComponent(membership.school_id))]);let merge=(local,remote)=>{let m=new Map(local.map(x=>[x.id,x]));for(let x of remote){delete x.user_id;m.set(x.id,{...m.get(x.id),...x})}return [...m.values()]};d.students=merge(d.students,ss);d.payments=merge(d.payments,pp);d.expenses=merge(d.expenses,ee);d.inventoryItems=merge(d.inventoryItems,ii);d.inventoryOrders=merge(d.inventoryOrders,io);d.studentInventory=merge(d.studentInventory,si);if(sch?.[0]?.config)d.settings={...d.settings,...sch[0].config};d.sync.lastSyncAt=new Date().toISOString();d.sync.lastError='';save(d);return d.sync}
 function receiptNo(d,p){let y=new Date(p.paymentDate).getFullYear(),c=p.className.replace(/\s/g,'').toUpperCase(),n=d.payments.filter(x=>x.className===p.className&&new Date(x.paymentDate).getFullYear()===y).length+1;return (d.settings.receiptPrefix||'SFD')+'-'+c+'-'+y+'-'+String(n).padStart(4,'0')}
-function pdf(d,p,s){return new Promise((ok,no)=>{let f=path.join(dirs(),'Invoices',p.receiptNo+'.pdf'),doc=new PDFDocument({margin:46,size:'A4'}),st=fs.createWriteStream(f);doc.pipe(st);doc.font('Helvetica-Bold').fontSize(24).text(d.settings.schoolName,{align:'center'});if(d.settings.schoolAddress)doc.font('Helvetica').fontSize(10).text(d.settings.schoolAddress,{align:'center'});if(d.settings.schoolPhone)doc.text('Phone: '+d.settings.schoolPhone,{align:'center'});doc.moveDown(.8);doc.moveTo(46,doc.y).lineTo(549,doc.y).stroke();doc.moveDown(.8);doc.font('Helvetica-Bold').fontSize(17).text('PAYMENT RECEIPT',{align:'center'});doc.moveDown(.8);doc.fontSize(11);let left=56,right=310,y=doc.y;doc.font('Helvetica-Bold').text('Receipt No.',left,y).font('Helvetica').text(p.receiptNo,left+90,y);doc.font('Helvetica-Bold').text('Payment Date',right,y).font('Helvetica').text(p.paymentDate,right+95,y);doc.moveDown(1.5);y=doc.y;for(let [a,b] of [['Student',s.name],['Admission No.',s.admissionNo||'-'],['Class',s.className],['Parent / Guardian',s.parentName||'-']]){doc.font('Helvetica-Bold').text(a,left,y,{width:120}).font('Helvetica').text(String(b),180,y,{width:350});y+=24}doc.y=y+6;doc.rect(56,doc.y,483,30).fillAndStroke('#f4f6fa','#d9dee8');doc.fillColor('#18243a').font('Helvetica-Bold').text('Fee Description',68,doc.y-21).text('Amount',440,doc.y-21);let feeDesc=p.feeType+(p.feeMonth?' - '+p.feeMonth:'');doc.rect(56,doc.y+2,483,42).stroke('#d9dee8');doc.font('Helvetica').text(feeDesc,68,doc.y+16,{width:340}).font('Helvetica-Bold').text((d.settings.currency||'₹')+Number(p.amount).toLocaleString('en-IN'),430,doc.y+16,{width:95,align:'right'});doc.moveDown(4.3);for(let [a,b] of [['Payment Method',p.method],['Reference No.',p.referenceNo||'-']])doc.font('Helvetica-Bold').text(a+': ',56,doc.y,{continued:true}).font('Helvetica').text(String(b));doc.moveDown(1.2);doc.moveTo(56,doc.y).lineTo(539,doc.y).stroke();doc.moveDown(.8);doc.font('Helvetica').fontSize(10).text(d.settings.receiptFooter||'Thank you for your payment.',{align:'center'});doc.moveDown(.4).fontSize(8).fillColor('#6b7280').text('This is a computer-generated receipt and does not require a signature.',{align:'center'});doc.end();st.on('finish',()=>ok(f));st.on('error',no)})}
+function pdf(d,p,s){return new Promise((ok,no)=>{
+  const f=path.join(dirs(),'Invoices',p.receiptNo+'.pdf'),doc=new PDFDocument({margin:46,size:'A4'}),st=fs.createWriteStream(f);
+  doc.pipe(st);
+  const purple='#54269A',yellow='#FFD229',ink='#25243A',muted='#66697A',line='#E7E3EF',soft='#FAF8FE';
+  const left=51,right=544,width=493;
+  // Logo area: use bundled logo when present; fall back cleanly to school name.
+  const logoCandidates=[path.join(__dirname,'assets','kidzee-logo.jpg'),path.join(__dirname,'assets','kidzee-logo.png')];
+  const logo=logoCandidates.find(x=>fs.existsSync(x));
+  if(logo){try{doc.image(logo,258,38,{fit:[80,80],align:'center',valign:'center'});doc.y=122}catch{}}
+  else doc.y=48;
+  doc.fillColor(purple).font('Helvetica-Bold').fontSize(17).text(d.settings.schoolName||'KIDZEE PRE-SCHOOL',left,doc.y,{width,align:'center'});
+  if(d.settings.schoolAddress)doc.moveDown(.25).fillColor(muted).font('Helvetica').fontSize(9).text(d.settings.schoolAddress,left,doc.y,{width,align:'center'});
+  if(d.settings.schoolPhone)doc.moveDown(.1).text('Phone: '+d.settings.schoolPhone,left,doc.y,{width,align:'center'});
+  doc.moveDown(.8);
+  let y=doc.y;
+  doc.roundedRect(left,y,width,34,5).fillAndStroke('#FFF5C7',yellow);
+  doc.fillColor(purple).font('Helvetica-Bold').fontSize(16).text('PAYMENT RECEIPT',left,y+9,{width,align:'center'});
+  y+=50;
+  const cell=(x,w,label,value)=>{doc.fillColor(ink).font('Helvetica-Bold').fontSize(9).text(label,x,y+8,{width:w});doc.font('Helvetica').text(String(value||'-'),x,y+22,{width:w});};
+  doc.rect(left,y,width,43).fillAndStroke(soft,line);
+  cell(left+10,235,'Receipt No.',p.receiptNo);cell(left+260,220,'Payment Date',p.paymentDate);
+  y+=55;
+  const info=[['Student Name',s.name,'Admission No.',s.admissionNo||'-'],['Class',s.className,'Parent / Guardian',s.parentName||'-']];
+  for(const row of info){
+    doc.rect(left,y,width,39).stroke(line);
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(9).text(row[0],left+10,y+8,{width:92});
+    doc.font('Helvetica').text(String(row[1]),left+105,y+8,{width:130});
+    doc.font('Helvetica-Bold').text(row[2],left+255,y+8,{width:105});
+    doc.font('Helvetica').text(String(row[3]),left+363,y+8,{width:120});
+    y+=39;
+  }
+  y+=14;
+  doc.rect(left,y,width,31).fillAndStroke(purple,purple);
+  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(10).text('Fee Description',left+12,y+10,{width:340});
+  doc.text('Amount',left+382,y+10,{width:98,align:'right'});
+  y+=31;
+  const feeDesc=p.feeType+(p.feeMonth?' - '+p.feeMonth:'');
+  doc.rect(left,y,width,43).stroke(line);
+  doc.fillColor(ink).font('Helvetica').fontSize(10).text(feeDesc,left+12,y+15,{width:340});
+  doc.font('Helvetica-Bold').text((d.settings.currency||'Rs. ')+Number(p.amount).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}),left+382,y+15,{width:98,align:'right'});
+  y+=57;
+  doc.rect(left,y,width,43).fillAndStroke(soft,line);
+  doc.fillColor(ink).font('Helvetica-Bold').fontSize(9).text('Payment Method',left+10,y+8,{width:110});
+  doc.font('Helvetica').text(String(p.method||'-'),left+120,y+8,{width:120});
+  doc.font('Helvetica-Bold').text('Reference No.',left+260,y+8,{width:100});
+  doc.font('Helvetica').text(String(p.referenceNo||'-'),left+365,y+8,{width:115});
+  y+=62;
+  doc.roundedRect(left,y,width,84,5).fillAndStroke('#FFF9E6',yellow);
+  doc.fillColor(purple).font('Helvetica-Bold').fontSize(9).text('IMPORTANT',left,y+10,{width,align:'center'});
+  doc.fillColor('#8A5A00').fontSize(9).text('Fees once paid are non-refundable.',left+12,y+29,{width:width-24,align:'center'});
+  doc.fillColor(muted).font('Helvetica').fontSize(8.5).text('This is a computer-generated receipt. No signature or school stamp is required.',left+12,y+47,{width:width-24,align:'center'});
+  doc.text('Please retain this receipt for your records.',left+12,y+63,{width:width-24,align:'center'});
+  y+=100;
+  doc.fillColor(muted).font('Helvetica').fontSize(9).text(d.settings.receiptFooter||'Thank you for your payment.',left,y,{width,align:'center'});
+  doc.end();st.on('finish',()=>ok(f));st.on('error',no);
+})}
 async function excel(d){let wb=new ExcelJS.Workbook(),sm=Object.fromEntries(d.students.map(s=>[s.id,s]));function sheet(n,rows){let w=wb.addWorksheet(n);w.columns=[['Date','paymentDate',14],['Receipt','receiptNo',24],['Admission','admission',14],['Student','student',22],['Class','className',12],['Fee Type','feeType',16],['Fee Month','feeMonth',14],['Amount','amount',12],['Method','method',14]].map(([header,key,width])=>({header,key,width}));for(let p of rows){let s=sm[p.studentId]||{};w.addRow({...p,admission:s.admissionNo||'',student:s.name||'',amount:Number(p.amount)})}w.getRow(1).font={bold:true};w.views=[{state:'frozen',ySplit:1}]}sheet('All Payments',d.payments);for(let c of classes)sheet(c,d.payments.filter(p=>p.className===c));let ew=wb.addWorksheet('Expenses');ew.columns=[['Date','expense_date',14],['Category','category',18],['Description','description',34],['Vendor','vendor',20],['Amount','amount',14],['Method','payment_method',16],['Reference','reference_no',18],['Receipt','receipt_path',30]].map(([header,key,width])=>({header,key,width}));(d.expenses||[]).forEach(x=>ew.addRow({...x,amount:Number(x.amount||0)}));ew.getRow(1).font={bold:true};let iw=wb.addWorksheet('Inventory');iw.columns=[['Type','item_type',12],['Item','name',24],['Variant','variant',16],['SKU','sku',14],['Stock On Hand','stock_on_hand',14],['Pending Delivery','ordered_pending',16],['Reorder Level','reorder_level',14]].map(([header,key,width])=>({header,key,width}));(d.inventoryItems||[]).forEach(x=>iw.addRow(x));iw.getRow(1).font={bold:true};let sw=wb.addWorksheet('Student Inventory');sw.columns=[['Student ID','student_id',22],['Item ID','item_id',22],['Required','required',10],['Status','status',14],['Qty','quantity',8],['Requested','requested_at',14],['Issued','issued_at',14],['Notes','notes',30]].map(([header,key,width])=>({header,key,width}));(d.studentInventory||[]).forEach(x=>sw.addRow(x));sw.getRow(1).font={bold:true};let now=new Date().toISOString().slice(0,7),pend=d.students.filter(s=>s.active!==false&&!d.payments.some(p=>p.studentId===s.id&&p.feeType==='Monthly Fee'&&p.feeMonth===now)),w=wb.addWorksheet('Pending Fees');w.addRow(['Admission','Student','Class','Parent','Phone','Monthly Fee']);pend.forEach(s=>w.addRow([s.admissionNo,s.name,s.className,s.parentName,s.phone,Number(s.monthlyFee||0)]));w.getRow(1).font={bold:true};let r=await dialog.showSaveDialog({defaultPath:path.join(app.getPath('documents'),'School-Fee-Desk-'+now+'.xlsx'),filters:[{name:'Excel',extensions:['xlsx']}]});if(r.canceled)return null;await wb.xlsx.writeFile(r.filePath);return r.filePath}
 ipcMain.handle('app:state',()=>state());
 ipcMain.handle('auth:setupPin',(_,p)=>{if(!/^\d{4,8}$/.test(p))throw Error('Use a 4-8 digit PIN.');let d=load();d.auth.salt=crypto.randomBytes(16).toString('hex');d.auth.hash=hp(p,d.auth.salt);save(d);return true});
