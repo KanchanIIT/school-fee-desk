@@ -44,3 +44,17 @@ function applyRole(){
   if($('saveSchool')) $('saveSchool').style.display=signed&&!isAdmin?'none':'';
   ['schoolName','schoolAddress','schoolPhone','currency','academicYear','receiptPrefix','receiptFooter','whatsappTemplate'].forEach(id=>{if($(id))$(id).disabled=signed&&!isAdmin});
 }
+
+$('createUser').onclick=async()=>{
+  try{
+    const email=$('newUserEmail').value.trim();
+    const password=$('newUserPassword').value;
+    const role=$('newUserRole').value;
+    if(!email||password.length<8)return alert('Enter a valid email and a password of at least 8 characters.');
+    const r=await schoolAPI.createUser({email,password,role});
+    $('userCreateStatus').textContent='Created '+r.role+' login: '+r.email;
+    $('newUserEmail').value='';
+    $('newUserPassword').value='';
+    toast('New login created');
+  }catch(e){alert(e.message)}
+};
