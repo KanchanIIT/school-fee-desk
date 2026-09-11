@@ -3,7 +3,7 @@ const fs=require('fs'),path=require('path'),crypto=require('crypto'),PDFDocument
 let win,session=null; const classes=['PG','Nursery','Jr KG','Sr KG'];
 const df=()=>path.join(app.getPath('userData'),'school-data.json');
 const dirs=()=>{let b=path.join(app.getPath('documents'),'School Fee Desk');for(let x of ['Invoices','Backups'])fs.mkdirSync(path.join(b,x),{recursive:true});return b};
-const fresh=()=>({settings:{schoolName:'My School',schoolAddress:'',schoolPhone:'',currency:'₹',academicYear:'2026-27',receiptPrefix:'SFD',cloudUrl:'',cloudAnonKey:'',cloudEmail:'',refreshToken:''},auth:{salt:'',hash:''},students:[],payments:[],sync:{lastSyncAt:'',lastError:''}});
+const fresh=()=>({settings:{schoolName:'My School',schoolAddress:'',schoolPhone:'',currency:'₹',academicYear:'2026-27',receiptPrefix:'SFD',cloudUrl:'https://xtscibvomsurxlmdyhyv.supabase.co',cloudAnonKey:'sb_publishable_gLSNxNqsE_FmORg6izdw9g_kfaY_Ynj',cloudEmail:'',refreshToken:''},auth:{salt:'',hash:''},students:[],payments:[],sync:{lastSyncAt:'',lastError:''}});
 function load(){try{return Object.assign(fresh(),JSON.parse(fs.readFileSync(df(),'utf8')))}catch{return fresh()}}
 function save(d){fs.mkdirSync(path.dirname(df()),{recursive:true});fs.writeFileSync(df(),JSON.stringify(d,null,2))}
 function state(){let d=load(),x=structuredClone(d);x.settings.cloudAnonKey=x.settings.cloudAnonKey?'••••••••':'';x.settings.refreshToken='';x.auth={pinConfigured:!!d.auth.hash};x.cloud={configured:!!(d.settings.cloudUrl&&d.settings.cloudAnonKey),signedIn:!!session,email:d.settings.cloudEmail,lastSyncAt:d.sync.lastSyncAt,lastError:d.sync.lastError};return x}
