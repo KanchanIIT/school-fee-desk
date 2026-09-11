@@ -2,10 +2,10 @@ let S=null,editing=null,lastPayment=null;const $=id=>document.getElementById(id)
 function toast(t){$('toast').textContent=t;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2200)}
 async function refresh(){S=await schoolAPI.getState();render()}
 function pending(m=ym()){return S.students.filter(s=>s.active!==false&&!S.payments.some(p=>p.studentId===s.id&&p.feeType==='Monthly Fee'&&p.feeMonth===m))}
-function render(){ $('schoolSide').textContent=S.settings.schoolName;$('subtitle').textContent=S.settings.academicYear;$('cloudBadge').textContent=S.cloud.signedIn?'☁ Cloud connected':S.cloud.configured?'☁ Cloud configured':'☁ Cloud not connected';
+function render(){ $('schoolSide').textContent=S.settings.schoolName;$('subtitle').textContent=S.settings.academicYear;$('cloudBadge').textContent=S.cloud.signedIn?'☁ '+(S.cloud.role||'user')+' • Cloud connected':S.cloud.configured?'☁ Cloud configured':'☁ Cloud not connected';
  let m=ym(),ps=S.payments.filter(p=>p.paymentDate?.startsWith(m));$('monthTotal').textContent=money(ps.reduce((a,p)=>a+Number(p.amount),0));$('studentCount').textContent=S.students.filter(s=>s.active!==false).length;$('paymentCount').textContent=ps.length;$('pendingCount').textContent=pending(m).length;
  let max=1,vals=['PG','Nursery','Jr KG','Sr KG'].map(c=>[c,ps.filter(p=>p.className===c).reduce((a,p)=>a+Number(p.amount),0)]);max=Math.max(...vals.map(x=>x[1]),1);$('classSummary').innerHTML=vals.map(([c,v])=>'<div class="summary"><b>'+c+'</b><div class="bar"><i style="width:'+v/max*100+'%"></i></div><span>'+money(v)+'</span></div>').join('');
- renderStudents();renderPayments();renderPending();fillStudents();fillSettings()}
+ renderStudents();renderPayments();renderPending();fillStudents();fillSettings();applyRole()}
 function renderStudents(){let q=($('studentSearch')?.value||'').toLowerCase(),a=S.students.filter(s=>[s.name,s.admissionNo,s.parentName,s.phone,s.className].join(' ').toLowerCase().includes(q));$('studentRows').innerHTML=a.map(s=>'<tr'+(s.active===false?' style="opacity:.5"':'')+'><td>'+esc(s.admissionNo)+'</td><td><b>'+esc(s.name)+'</b></td><td>'+s.className+'</td><td>'+esc(s.parentName)+'</td><td>'+esc(s.phone)+'</td><td>'+money(s.monthlyFee)+'</td><td><button class="link" onclick="editStudent(\''+s.id+'\')">Edit</button><button class="link danger" onclick="delStudent(\''+s.id+'\')">Delete</button></td></tr>').join('')||'<tr><td colspan="7">No students yet.</td></tr>'}
 function renderPayments(){let c=$('ledgerClass')?.value||'',m=$('ledgerMonth')?.value||'',sm=Object.fromEntries(S.students.map(s=>[s.id,s]));let a=[...S.payments].filter(p=>(!c||p.className===c)&&(!m||p.paymentDate?.startsWith(m))).sort((a,b)=>b.paymentDate.localeCompare(a.paymentDate));$('paymentRows').innerHTML=a.map(p=>'<tr><td>'+p.paymentDate+'</td><td>'+p.receiptNo+'</td><td>'+esc(sm[p.studentId]?.name)+'</td><td>'+p.className+'</td><td>'+p.feeType+'</td><td>'+(p.feeMonth||'-')+'</td><td>'+money(p.amount)+'</td><td>'+p.method+'</td><td><button class="link" onclick="openReceipt(\''+p.id+'\')">Receipt</button><button class="link" onclick="sendWA(\''+p.id+'\')">WhatsApp</button></td></tr>').join('')||'<tr><td colspan="9">No payments.</td></tr>'}
 function renderPending(){let m=$('pendingMonth')?.value||ym();$('pendingRows').innerHTML=pending(m).map(s=>'<tr><td>'+esc(s.admissionNo)+'</td><td><b>'+esc(s.name)+'</b></td><td>'+s.className+'</td><td>'+esc(s.parentName)+'</td><td>'+esc(s.phone)+'</td><td>'+money(s.monthlyFee)+'</td><td><button class="link" onclick="remind(\''+s.id+'\')">WhatsApp Reminder</button></td></tr>').join('')||'<tr><td colspan="7">Everyone has paid for this month.</td></tr>'}
@@ -33,3 +33,14 @@ $('saveSchool').onclick=async()=>{S=await schoolAPI.saveSettings({schoolName:$('
 $('cloudLogin').onclick=async()=>{try{S=await schoolAPI.cloudSignIn($('cloudEmail').value.trim(),$('cloudPassword').value);render();toast('Cloud signed in')}catch(e){alert(e.message)}};$('cloudLogout').onclick=async()=>{S=await schoolAPI.cloudSignOut();render()};
 $('sync').onclick=async()=>{try{S=await schoolAPI.cloudSync();render();toast('Cloud sync complete')}catch(e){alert(e.message)}};$('export').onclick=async()=>{let f=await schoolAPI.exportExcel();if(f)toast('Excel exported')};$('backup').onclick=async()=>{await schoolAPI.createBackup();toast('Backup created')};
 $('changePin').onclick=async()=>{try{await schoolAPI.changePin($('oldPin').value,$('newPin').value);$('oldPin').value=$('newPin').value='';toast('PIN changed')}catch(e){alert(e.message)}};$('openInvoices').onclick=()=>schoolAPI.openInvoices();$('openBackups').onclick=()=>schoolAPI.openBackupFolder();
+function applyRole(){
+  const role=S?.cloud?.role||'';
+  const signed=!!S?.cloud?.signedIn;
+  const canEdit=role==='admin'||role==='receptionist';
+  const isAdmin=role==='admin';
+  if($('addStudent')) $('addStudent').style.display=signed&&!canEdit?'none':'';
+  document.querySelectorAll('[data-page="payment"]').forEach(x=>x.style.display=signed&&!canEdit?'none':'');
+  if($('userManagement')) $('userManagement').style.display=isAdmin?'block':'none';
+  if($('saveSchool')) $('saveSchool').style.display=signed&&!isAdmin?'none':'';
+  ['schoolName','schoolAddress','schoolPhone','currency','academicYear','receiptPrefix','receiptFooter','whatsappTemplate'].forEach(id=>{if($(id))$(id).disabled=signed&&!isAdmin});
+}
