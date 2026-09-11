@@ -3,9 +3,83 @@ function toast(t){$('toast').textContent=t;$('toast').style.display='block';setT
 async function refresh(){S=await schoolAPI.getState();render()}
 function pending(m=ym()){return S.students.filter(s=>s.active!==false&&!S.payments.some(p=>p.studentId===s.id&&p.feeType==='Monthly Fee'&&p.feeMonth===m))}
 function render(){ $('schoolSide').textContent=S.settings.schoolName;$('subtitle').textContent=S.settings.academicYear;$('cloudBadge').textContent=S.cloud.signedIn?'☁ '+(S.cloud.role||'user')+' • Cloud connected':S.cloud.configured?'☁ Cloud configured':'☁ Cloud not connected';
- let m=ym(),ps=S.payments.filter(p=>p.paymentDate?.startsWith(m));$('monthTotal').textContent=money(ps.reduce((a,p)=>a+Number(p.amount),0));$('studentCount').textContent=S.students.filter(s=>s.active!==false).length;$('paymentCount').textContent=ps.length;$('pendingCount').textContent=pending(m).length;
- let max=1,vals=['PG','Nursery','Jr KG','Sr KG'].map(c=>[c,ps.filter(p=>p.className===c).reduce((a,p)=>a+Number(p.amount),0)]);max=Math.max(...vals.map(x=>x[1]),1);$('classSummary').innerHTML=vals.map(([c,v])=>'<div class="summary"><b>'+c+'</b><div class="bar"><i style="width:'+v/max*100+'%"></i></div><span>'+money(v)+'</span></div>').join('');
- renderStudents();renderPayments();renderPending();renderExpenses();renderInventory();fillStudents();fillInventorySelectors();fillSettings();applyRole()}
+ renderDashboard();renderStudents();renderPayments();renderPending();renderExpenses();renderInventory();fillStudents();fillInventorySelectors();fillSettings();applyRole()}
+
+function renderDashboard(){
+  if(!$('dashboardMonth'))return;
+  const m=$('dashboardMonth').value||ym();
+  const active=(S.students||[]).filter(s=>s.active!==false);
+  const monthPayments=(S.payments||[]).filter(p=>(p.paymentDate||'').startsWith(m));
+  const monthExpenses=(S.expenses||[]).filter(x=>(x.expense_date||'').startsWith(m));
+  const monthlyFeePayments=monthPayments.filter(p=>p.feeType==='Monthly Fee'&&p.feeMonth===m);
+  const paidIds=new Set(monthlyFeePayments.map(p=>p.studentId));
+  const pendingStudents=active.filter(s=>!paidIds.has(s.id));
+  const collected=monthPayments.reduce((a,p)=>a+Number(p.amount||0),0);
+  const monthlyCollected=monthlyFeePayments.reduce((a,p)=>a+Number(p.amount||0),0);
+  const expected=active.reduce((a,s)=>a+Number(s.monthlyFee||0),0);
+  const pendingAmount=pendingStudents.reduce((a,s)=>a+Number(s.monthlyFee||0),0);
+  const expenses=monthExpenses.reduce((a,x)=>a+Number(x.amount||0),0);
+  const allIncome=(S.payments||[]).reduce((a,p)=>a+Number(p.amount||0),0);
+  const allExpenses=(S.expenses||[]).reduce((a,x)=>a+Number(x.amount||0),0);
+  const rate=expected>0?Math.min(100,Math.round(monthlyCollected/expected*100)):0;
+
+  $('monthTotal').textContent=money(collected);
+  $('expectedMonthTotal').textContent=money(expected);
+  $('pendingFeeAmount').textContent=money(pendingAmount);
+  $('expenseMonthTotal').textContent=money(expenses);
+  $('netMonthTotal').textContent=money(collected-expenses);
+  $('accountBalance').textContent=money(allIncome-allExpenses);
+  $('collectionRate').textContent=rate+'%';
+  $('studentCount').textContent=active.length;
+  $('pendingCount').textContent=pendingStudents.length;
+  $('paidStudentCount').textContent=paidIds.size;
+  $('pendingCountText').textContent=pendingStudents.length+' students pending';
+  $('paymentCountText').textContent=monthPayments.length+' payments this month';
+  $('collectionRingText').textContent=rate+'%';
+  $('collectionRing').style.setProperty('--p',rate);
+
+  const classes=['PG','Nursery','Jr KG','Sr KG'];
+  $('classDashboardTable').innerHTML=
+    '<div class="class-dash-row head"><span>Class</span><span>Students</span><span>Progress</span><span>Collected</span><span>Pending</span><span>Rate</span></div>'+
+    classes.map(cls=>{
+      const ss=active.filter(s=>s.className===cls);
+      const ids=new Set(ss.map(s=>s.id));
+      const cp=monthlyFeePayments.filter(p=>ids.has(p.studentId));
+      const cPaid=new Set(cp.map(p=>p.studentId));
+      const cExpected=ss.reduce((a,s)=>a+Number(s.monthlyFee||0),0);
+      const cCollected=cp.reduce((a,p)=>a+Number(p.amount||0),0);
+      const cPending=ss.filter(s=>!cPaid.has(s.id)).reduce((a,s)=>a+Number(s.monthlyFee||0),0);
+      const cr=cExpected>0?Math.min(100,Math.round(cCollected/cExpected*100)):0;
+      return '<div class="class-dash-row"><b>'+cls+'</b><span>'+ss.length+'</span><div class="progress"><i style="width:'+cr+'%"></i></div><strong>'+money(cCollected)+'</strong><span>'+money(cPending)+'</span><span class="badge '+(cr>=90?'good':cr>=70?'info':'warn')+'">'+cr+'%</span></div>';
+    }).join('');
+
+  const cat={};
+  monthExpenses.forEach(x=>cat[x.category]=(cat[x.category]||0)+Number(x.amount||0));
+  const top=Object.entries(cat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxCat=Math.max(1,...top.map(x=>x[1]));
+  $('expenseBreakdown').innerHTML=top.length?top.map(([k,v])=>'<div class="breakdown-row"><span>'+esc(k)+'</span><b>'+money(v)+'</b><div class="mini-bar"><i style="width:'+Math.round(v/maxCat*100)+'%"></i></div></div>').join(''):'<p class="muted">No expenses recorded for this month.</p>';
+
+  const items=S.inventoryItems||[],si=S.studentInventory||[];
+  const alerts=[];
+  items.forEach(it=>{
+    const waiting=si.filter(x=>x.item_id===it.id&&x.status==='Waiting').reduce((a,x)=>a+Number(x.quantity||1),0);
+    const stock=Number(it.stock_on_hand||0),pending=Number(it.ordered_pending||0),reorder=Number(it.reorder_level||0);
+    if(waiting>stock)alerts.push({label:it.name+(it.variant?' — '+it.variant:''),detail:(waiting-stock)+' units short for waiting students',kind:'danger'});
+    else if(stock<=reorder)alerts.push({label:it.name+(it.variant?' — '+it.variant:''),detail:'Low stock: '+stock+' on hand',kind:'warn'});
+    else if(pending>0)alerts.push({label:it.name+(it.variant?' — '+it.variant:''),detail:pending+' units pending delivery',kind:'info'});
+  });
+  $('inventoryAlerts').innerHTML=alerts.length?alerts.slice(0,6).map(a=>'<div class="alert-row"><span>'+esc(a.label)+'</span><span class="badge '+a.kind+'">'+esc(a.detail)+'</span></div>').join(''):'<div class="alert-row"><span>Inventory status</span><span class="badge good">No urgent alerts</span></div>';
+
+  const kitIncluded=active.filter(s=>s.kit_included).length;
+  const waitingStudents=new Set(si.filter(x=>x.status==='Waiting').map(x=>x.student_id)).size;
+  const pendingOrders=(S.inventoryOrders||[]).filter(x=>x.status!=='Received'&&x.status!=='Cancelled').length;
+  $('quickSummary').innerHTML=
+    '<div class="quick-row"><span>Students with kit package</span><b>'+kitIncluded+'</b></div>'+
+    '<div class="quick-row"><span>Students waiting for inventory</span><b>'+waitingStudents+'</b></div>'+
+    '<div class="quick-row"><span>Pending inventory orders</span><b>'+pendingOrders+'</b></div>'+
+    '<div class="quick-row"><span>Fee payments recorded</span><b>'+monthPayments.length+'</b></div>';
+}
+
 function renderStudents(){let q=($('studentSearch')?.value||'').toLowerCase(),a=S.students.filter(s=>[s.name,s.admissionNo,s.parentName,s.phone,s.className].join(' ').toLowerCase().includes(q)),role=S?.cloud?.role||'',canEdit=role==='admin'||role==='receptionist',canDelete=role==='admin';$('studentRows').innerHTML=a.map(s=>'<tr'+(s.active===false?' style="opacity:.5"':'')+'><td>'+esc(s.admissionNo)+'</td><td><b>'+esc(s.name)+'</b></td><td>'+s.className+'</td><td>'+esc(s.parentName)+'</td><td>'+esc(s.phone)+'</td><td>'+money(s.monthlyFee)+'</td><td>'+(canEdit?'<button class="link" onclick="editStudent(\''+s.id+'\')">Edit</button>':'')+(canDelete?'<button class="link danger" onclick="delStudent(\''+s.id+'\')">Delete</button>':'')+'</td></tr>').join('')||'<tr><td colspan="7">No students yet.</td></tr>'}
 function renderPayments(){let c=$('ledgerClass')?.value||'',m=$('ledgerMonth')?.value||'',sm=Object.fromEntries(S.students.map(s=>[s.id,s]));let a=[...S.payments].filter(p=>(!c||p.className===c)&&(!m||p.paymentDate?.startsWith(m))).sort((a,b)=>b.paymentDate.localeCompare(a.paymentDate));$('paymentRows').innerHTML=a.map(p=>'<tr><td>'+p.paymentDate+'</td><td>'+p.receiptNo+'</td><td>'+esc(sm[p.studentId]?.name)+'</td><td>'+p.className+'</td><td>'+p.feeType+'</td><td>'+(p.feeMonth||'-')+'</td><td>'+money(p.amount)+'</td><td>'+p.method+'</td><td><button class="link" onclick="openReceipt(\''+p.id+'\')">Receipt</button><button class="link" onclick="sendWA(\''+p.id+'\')">WhatsApp</button></td></tr>').join('')||'<tr><td colspan="9">No payments.</td></tr>'}
 function renderPending(){let m=$('pendingMonth')?.value||ym(),canAct=(S?.cloud?.role==='admin'||S?.cloud?.role==='receptionist');$('pendingRows').innerHTML=pending(m).map(s=>'<tr><td>'+esc(s.admissionNo)+'</td><td><b>'+esc(s.name)+'</b></td><td>'+s.className+'</td><td>'+esc(s.parentName)+'</td><td>'+esc(s.phone)+'</td><td>'+money(s.monthlyFee)+'</td><td>'+(canAct?'<button class="link" onclick="remind(\''+s.id+'\')">WhatsApp Reminder</button>':'')+'</td></tr>').join('')||'<tr><td colspan="7">Everyone has paid for this month.</td></tr>'}
@@ -19,10 +93,10 @@ window.openReceipt=id=>{let p=S.payments.find(x=>x.id===id);if(p?.receiptPath)sc
 window.sendWA=id=>{let p=S.payments.find(x=>x.id===id);schoolAPI.openWhatsApp(p)}
 window.remind=id=>{let s=S.students.find(x=>x.id===id),m=$('pendingMonth').value||ym();let fake={studentId:id,amount:s.monthlyFee,feeType:'Monthly Fee reminder',feeMonth:m,receiptNo:'Pending'};schoolAPI.openWhatsApp(fake)}
 document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>page(b.dataset.page));
-$('payDate').value=today();$('feeMonth').value=ym();$('pendingMonth').value=ym();if($('expenseDate'))$('expenseDate').value=today();if($('orderDate'))$('orderDate').value=today();
+$('payDate').value=today();$('feeMonth').value=ym();$('pendingMonth').value=ym();if($('dashboardMonth'))$('dashboardMonth').value=ym();if($('expenseDate'))$('expenseDate').value=today();if($('orderDate'))$('orderDate').value=today();
 $('unlock').onclick=async()=>{let p=$('pin').value;if(!S)S=await schoolAPI.getState();try{if(!S.auth.pinConfigured){await schoolAPI.setupPin(p);S=await schoolAPI.getState()}else if(!await schoolAPI.verifyPin(p)){alert('Incorrect PIN');return}$('lock').classList.add('hidden');$('app').classList.remove('hidden');render()}catch(e){alert(e.message)}};
 (async()=>{S=await schoolAPI.getState();$('lockText').textContent=S.auth.pinConfigured?'Enter staff PIN':'Create a staff PIN';$('lockHelp').textContent=S.auth.pinConfigured?'':'First launch: choose a 4–8 digit PIN.'})();
-$('studentSearch').oninput=renderStudents;$('ledgerClass').onchange=renderPayments;$('ledgerMonth').onchange=renderPayments;$('pendingMonth').onchange=renderPending;
+$('studentSearch').oninput=renderStudents;$('ledgerClass').onchange=renderPayments;$('ledgerMonth').onchange=renderPayments;$('pendingMonth').onchange=renderPending;if($('dashboardMonth'))$('dashboardMonth').onchange=renderDashboard;
 $('addStudent').onclick=()=>{editing=null;$('modalTitle').textContent='Add Student';['sid','sAdmission','sName','sParent','sPhone'].forEach(x=>$(x).value='');$('sFee').value='';$('sClass').value='PG';$('sKitIncluded').value='false';$('sActive').checked=true;$('modal').classList.remove('hidden')};$('cancelStudent').onclick=()=>$('modal').classList.add('hidden');
 $('saveStudent').onclick=async()=>{if(!$('sName').value.trim())return alert('Student name is required.');try{S=await schoolAPI.saveStudent({id:editing||undefined,admissionNo:$('sAdmission').value.trim(),name:$('sName').value.trim(),className:$('sClass').value,parentName:$('sParent').value.trim(),phone:$('sPhone').value.trim(),monthlyFee:Number($('sFee').value||0),kit_included:$('sKitIncluded').value==='true',active:$('sActive').checked});$('modal').classList.add('hidden');render();toast('Student saved')}catch(e){alert(e.message)}};
 $('payStudent').onchange=()=>{let s=S.students.find(x=>x.id===$('payStudent').value);if(s)$('amount').value=s.monthlyFee||''};
@@ -42,9 +116,6 @@ function renderExpenses(){
   const all=(S.expenses||[]).reduce((a,x)=>a+Number(x.amount||0),0);
   if($('expenseSummaryMonth'))$('expenseSummaryMonth').textContent=money(month);
   if($('expenseSummaryAll'))$('expenseSummaryAll').textContent=money(all);
-  if($('expenseMonthTotal'))$('expenseMonthTotal').textContent=money(month);
-  const income=(S.payments||[]).filter(p=>(p.paymentDate||'').startsWith(ym())).reduce((a,p)=>a+Number(p.amount||0),0);
-  if($('netMonthTotal'))$('netMonthTotal').textContent=money(income-month);
 }
 function inventoryStats(itemId){
   const assigned=(S.studentInventory||[]).filter(x=>x.item_id===itemId);
